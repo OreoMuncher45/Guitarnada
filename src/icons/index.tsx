@@ -137,3 +137,16 @@ export function SparkIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function AnalyzeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 3v6" />
+      <path d="M7 7h10" />
+      <path d="M7 11h10" />
+      <path d="M7 15h4" />
+      <path d="M17 15l2 2-2 2" />
+      <path d="M19 19H3V5" />
+    </svg>
+  );
+}

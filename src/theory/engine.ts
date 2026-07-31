@@ -995,3 +995,94 @@ export const suggestNextFeeling = (used: Chord[]): FeelingSuggestion | null => {
   if (!pick) return null;
   return { direction, addChord: pick };
 };
+
+// ============================================================
+// Chord simplification — "simplified chords that sound similar."
+// Two layers:
+//   1. simplifyChord(chord)     — strip a single chord to its closest simpler form.
+//   2. simplifyProgression(...)  — reduce a whole progression to triads, with an
+//      optional barre-free revoice that swaps barre-only chords for the nearest
+//      diatonic relative that has an open shape (preserves harmonic function).
+// ============================================================
+
+// Quality rank: lower = simpler/more common. Used to pick "the closest simpler chord".
+const QUALITY_RANK: Record<ChordQuality, number> = {
+  maj: 0, min: 0, sus2: 4, sus4: 4,
+  dom7: 1, maj7: 2, m7: 2, "6": 2, m6: 3,
+  add9: 3, madd9: 4, "6/9": 6, maj9: 7, "9": 6, dim7: 8, m7b5: 8,
+  dim: 5, aug: 5, "7sus4": 9, other: 99,
+};
+
+export interface SimplifyResult {
+  chord: Chord;          // the resulting, simpler chord
+  changed: boolean;       // whether any reduction was applied
+  reason: string;         // one-line plain-English note
+}
+
+// Reduce a single chord's color down toward a plain triad, keeping the root + family.
+export const simplifyChord = (chord: Chord): SimplifyResult => {
+  const q = chord.quality;
+  if (q === "maj" || q === "min" || q === "dim" || q === "aug") return { chord, changed: false, reason: "Already a plain triad." };
+
+  // Everything else: strip to the same-family triad.
+  let baseQuality: ChordQuality;
+  let reason: string;
+  if (q === "maj7" || q === "dom7" || q === "add9" || q === "maj9" || q === "6" || q === "6/9" || q === "7sus4") {
+    baseQuality = "maj";
+    reason = "Strips the color — back to a major triad.";
+  } else if (q === "m7" || q === "madd9" || q === "m6") {
+    baseQuality = "min";
+    reason = "Strips the color — back to a minor triad.";
+  } else if (q === "dim7" || q === "m7b5") {
+    baseQuality = "dim";
+    reason = "Strips the 7th — back to a diminished triad.";
+  } else if (q === "sus2" || q === "sus4") {
+    baseQuality = "maj";
+    reason = "Resolves the suspension to a major triad.";
+  } else {
+    baseQuality = "maj";
+    reason = "Back to a triad.";
+  }
+
+  const next = makeChord(chord.root, baseQuality);
+  return { chord: next, changed: true, reason };
+};
+
+// Whole-progression simplification: strip every chord to its family triad, then
+// (when `preferBarreFree` is true) swap any chord whose simplest triad would still be
+// a barre-only chord for its nearest diatonic relative that has an open shape.
+// Returns a new progression writes nothing — the caller assigns.
+export const simplifyProgression = (
+  chords: Chord[],
+  key: Key,
+  preferBarreFree = false,
+  barreFreeNames?: Set<string>
+): { chords: Chord[]; reasons: string[] } => {
+  const reasons: string[] = [];
+  let simplified = chords.map((c) => {
+    const r = simplifyChord(c);
+    reasons.push(r.reason);
+    return r.chord;
+  });
+
+  if (preferBarreFree && barreFreeNames && barreFreeNames.size > 0) {
+    const diatonic = diatonicChords(key);
+    simplified = simplified.map((c, i) => {
+      if (barreFreeNames.has(c.displayName)) return c;
+      // Find the nearest diatonic chord (by roman proximity) that has an open shape and
+      // is in the same broad family (maj→maj, min→min) when possible.
+      const famMatch = diatonic.find((d) =>
+        d.quality === c.quality && barreFreeNames.has(d.displayName)
+      );
+      const famAny = diatonic.find((d) => barreFreeNames.has(d.displayName));
+      const sub = famMatch ?? famAny;
+      if (sub) {
+        reasons[i] = `${c.displayName} is a barre on standard tuning → swapped for ${sub.displayName} (same key, sounds similar).`;
+        return sub;
+      }
+      return c;
+    });
+  }
+
+  return { chords: simplified, reasons };
+};

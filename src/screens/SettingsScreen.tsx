@@ -1,4 +1,5 @@
 import { useStore } from "../store/game";
+import { useAnalyzeStore } from "../store/analyze";
 
 const ACHIEVEMENTS: { key: string; title: string; description: string }[] = [
   { key: "first-roll", title: "First night", description: "Saved your first Roll." },
@@ -11,6 +12,8 @@ export function SettingsScreen() {
   const savedRolls = useStore((s) => s.savedRolls);
   const savedChords = useStore((s) => s.savedChords);
 
+  const { backendUrl, useBackend, setBackendUrl, setUseBackend } = useAnalyzeStore();
+
   return (
     <main className="section section--pad" style={{ paddingTop: "4.5rem", paddingBottom: "calc(7rem + env(safe-area-inset-bottom))" }}>
       <div className="label" style={{ marginBottom: "1.4rem" }}>Settings</div>
@@ -18,6 +21,25 @@ export function SettingsScreen() {
 
       <div className="body-copy body-copy--narrow" style={{ marginBottom: "3rem" }}>
         Guitarnada is offline-first. Nothing here leaves your phone unless you ask. No accounts. No streaks. No popups.
+      </div>
+
+      <div className="label" style={{ marginBottom: "1rem", color: "var(--ash)" }}>Analyze backend</div>
+      <div className="body-copy body-copy--narrow" style={{ marginBottom: "1.4rem", fontSize: "0.84rem" }}>
+        The audio analyzer runs on-device by default. If you run the FastAPI backend (see github/backend), paste its URL below and toggle it on for higher accuracy — a librosa + essentia + Chordino pipeline replaces the on-device analyzer for file uploads.
+      </div>
+
+      <div style={{ marginBottom: "1rem" }}>
+        <input
+          className="textfield"
+          type="url"
+          placeholder="https://your-backend.onrender.com"
+          value={backendUrl}
+          onChange={(e) => setBackendUrl(e.target.value)}
+        />
+      </div>
+      <div className="chip-rail" style={{ marginBottom: "2rem" }}>
+        <button className={`chip ${!useBackend ? "chip--selected" : ""}`} onClick={() => setUseBackend(false)}>On-device (default)</button>
+        <button className={`chip ${useBackend ? "chip--selected" : ""}`} onClick={() => setUseBackend(true)}>Use backend</button>
       </div>
 
       <div className="label" style={{ marginBottom: "1rem", color: "var(--ash)" }}>Xp & achievements</div>

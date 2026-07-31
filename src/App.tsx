@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CreatorScreen } from "./screens/CreatorScreen";
 import { PlaygroundScreen } from "./screens/PlaygroundScreen";
+import { AnalyzeScreen } from "./screens/AnalyzeScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { TunerScreen } from "./screens/TunerScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
@@ -11,14 +12,15 @@ import { AchievementToast } from "./components/AchievementToast";
 import { useInstallPrompt } from "./lib/install";
 import { useStore } from "./store/game";
 import { guitar } from "./audio/guitar";
-import { CreateIcon, PlaygroundIcon, JournalIcon, TunerIcon, SettingsIcon } from "./icons";
+import { CreateIcon, PlaygroundIcon, AnalyzeIcon, JournalIcon, TunerIcon, SettingsIcon } from "./icons";
 
-type Tab = "create" | "playground" | "tuner" | "journal" | "settings";
+type Tab = "create" | "playground" | "analyze" | "tuner" | "journal" | "settings";
 
 interface TabDef { id: Tab; label: string; Icon: any; }
 const TABS: TabDef[] = [
   { id: "create",     label: "Create",     Icon: CreateIcon },
   { id: "playground", label: "Playground", Icon: PlaygroundIcon },
+  { id: "analyze",    label: "Analyze",    Icon: AnalyzeIcon },
   { id: "tuner",      label: "Tuner",      Icon: TunerIcon },
   { id: "journal",    label: "Journal",    Icon: JournalIcon },
   { id: "settings",   label: "Settings",   Icon: SettingsIcon },
@@ -27,8 +29,9 @@ const TABS: TabDef[] = [
 const CHAPTERS: Record<Tab, string> = {
   create: "Chapter one \u00B7 the start",
   playground: "Chapter two \u00B7 the maker",
-  tuner: "Chapter three \u00B7 the readiness",
-  journal: "Chapter four \u00B7 the ledger",
+  analyze: "Chapter three \u00B7 the lens",
+  tuner: "Chapter four \u00B7 the readiness",
+  journal: "Chapter five \u00B7 the ledger",
   settings: "Studio",
 };
 
@@ -124,6 +127,7 @@ export function App() {
       >
         {tab === "create" && <CreatorScreen />}
         {tab === "playground" && <PlaygroundScreen />}
+        {tab === "analyze" && <AnalyzeScreen />}
         {tab === "tuner" && <TunerScreen />}
         {tab === "journal" && <JournalScreen />}
         {tab === "settings" && <SettingsScreen />}
