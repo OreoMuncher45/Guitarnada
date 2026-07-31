@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore, type TransformationKind, KEY_TO_STRING, TUNINGS, tuningById, patternById, ALL_PATTERNS } from "../store/game";
-import { MOOD_LABELS, GENRE_LABELS, type Mood, type Genre, type Key, NOTE_CLASSES } from "../theory/engine";
+import { MOOD_LABELS, GENRE_LABELS, type Mood, type Genre, type Key, type Complexity, NOTE_CLASSES } from "../theory/engine";
 import { ChordDiagram } from "../components/ChordDiagram";
 import { DiceIcon, PlayIcon, CapoIcon, MetronomeIcon, ArrowIcon } from "../icons";
 import { guitar, midiToNote, openStringMidis } from "../audio/guitar";
@@ -13,6 +13,16 @@ const KEYS: Key[] = NOTE_CLASSES.flatMap((n) => [
   { tonic: n, type: "min" as const },
 ]);
 const keyLabel = (k: Key) => `${k.tonic} ${k.type === "maj" ? "Maj" : "min"}`;
+
+const COMPLEXITIES: { id: Complexity; label: string }[] = [
+  { id: "simple", label: "Simple" },
+  { id: "sparse", label: "Sparse" },
+  { id: "rich", label: "Rich" },
+  { id: "lush", label: "Lush" },
+  { id: "adventurous", label: "Adventurous" },
+  { id: "jazzy", label: "Jazzy" },
+  { id: "mixed", label: "Mixed" },
+];
 
 const TRANSFORMATIONS: { kind: TransformationKind; label: string }[] = [
   { kind: "sadder", label: "Sadder" },
@@ -28,6 +38,7 @@ export function CreatorScreen() {
   const genre = useStore((s) => s.genre);
   const key = useStore((s) => s.key);
   const complexity = useStore((s) => s.complexity);
+  const barreEnabled = useStore((s) => s.barreEnabled);
   const roll = useStore((s) => s.currentRoll);
   const rollerAnimation = useStore((s) => s.rollerAnimation);
   const tuningId = useStore((s) => s.tuningId);
@@ -38,6 +49,7 @@ export function CreatorScreen() {
   const setGenre = useStore((s) => s.setGenre);
   const setKey = useStore((s) => s.setKey);
   const setComplexity = useStore((s) => s.setComplexity);
+  const setBarre = useStore((s) => s.setBarre);
   const setTuningId = useStore((s) => s.setTuningId);
   const setCapo = useStore((s) => s.setCapo);
   const setBpm = useStore((s) => s.setBpm);
@@ -62,7 +74,7 @@ export function CreatorScreen() {
     if (!roll) return;
     const tuning = tuningById(tuningId);
     guitar.tune(tuning);
-    const midis = makeChordView(roll.progression.chords[0].root, roll.progression.chords[0].quality, tuningId).fingering;
+    const midis = makeChordView(roll.progression.chords[0].root, roll.progression.chords[0].quality, tuningId, barreEnabled).fingering;
     const playable = fingeringToPlayableMidis(midis, tuning).map((m) => m + capo);
     // walk one bar of the strum pattern through the guitar engine using time-shifted plucks
     const stepMs = (60_000 / bpm) / (strumPattern.beats / 4);
@@ -79,7 +91,7 @@ export function CreatorScreen() {
     guitar.tune(tuning);
     const barMs = (60_000 / bpm) * 4;
     roll.progression.chords.forEach((c, i) => {
-      const midis = fingeringToPlayableMidis(makeChordView(c.root, c.quality, tuningId).fingering, tuning).map((m) => m + capo);
+      const midis = fingeringToPlayableMidis(makeChordView(c.root, c.quality, tuningId, barreEnabled).fingering, tuning).map((m) => m + capo);
       guitar.playChord(midis, { when: guitar.now() + (i * barMs) / 1000 + 0.05, strum: "down" });
     });
   };
@@ -124,9 +136,21 @@ export function CreatorScreen() {
 
       <ConfigBlock label="Complexity">
         <div className="chip-rail">
-          {(["simple", "rich", "adventurous"] as const).map((c) => (
-            <button key={c} className={`chip ${complexity === c ? "chip--selected" : ""}`} onClick={() => setComplexity(c)}>{c[0].toUpperCase() + c.slice(1)}</button>
+          {COMPLEXITIES.map((c) => (
+            <button key={c.id} className={`chip ${complexity === c.id ? "chip--selected" : ""}`} onClick={() => setComplexity(c.id)}>{c.label}</button>
           ))}
+        </div>
+      </ConfigBlock>
+
+      <ConfigBlock label="Barre chords">
+        <div className="chip-rail">
+          <button className={`chip ${barreEnabled ? "chip--selected" : ""}`} onClick={() => setBarre(true)}>On</button>
+          <button className={`chip ${!barreEnabled ? "chip--selected" : ""}`} onClick={() => setBarre(false)}>Off</button>
+        </div>
+        <div className="body-copy body-copy--narrow" style={{ marginTop: "0.7rem", fontSize: "0.84rem" }}>
+          {barreEnabled
+            ? "Rolls may include barre shapes. Any chord without an open voicing falls back to a movable barre."
+            : "Rolls avoid barre chords — the engine searches for seeds whose chords have open-voicing shapes, and any chord diagram that can't be voiced open renders as a compact open-position shape instead. No barre is ever drawn."}
         </div>
       </ConfigBlock>
 
@@ -163,7 +187,7 @@ export function CreatorScreen() {
               <div key={i}>
                 <ChordDiagram
                   chordName={c.displayName}
-                  fingering={makeChordView(c.root, c.quality, tuningId).fingering}
+                  fingering={makeChordView(c.root, c.quality, tuningId, barreEnabled).fingering}
                   tuningId={tuningId}
                 />
                 <div className="mono" style={{ marginTop: "0.3rem", color: "var(--ash)" }}>{roll.progression.romans[i] ?? "—"}</div>

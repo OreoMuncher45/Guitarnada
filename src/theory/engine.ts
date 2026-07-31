@@ -65,7 +65,9 @@ export const GENRE_LABELS: Record<Genre, string> = {
   singerSongwriter: "Singer-songwriter", cinematic: "Cinematic", rockish: "Rock-ish",
 };
 
-export type Complexity = "simple" | "rich" | "adventurous";
+export type Complexity =
+  | "simple" | "rich" | "adventurous"
+  | "sparse" | "lush" | "jazzy" | "mixed";
 
 // === Pitch math ===
 export const semiOf = (note: NoteClass): number => SHARP_BY_NAME[note];
@@ -440,7 +442,79 @@ const pickWeighted = (rng: () => number, weights: BarWeights): string => {
   return Object.keys(weights)[0];
 };
 
-export const generateRoll = (
+export interface GenerateOpts {
+  // When false, the generator retries seeds up to `barreFreeAttempts` times so
+  // every chord in the roll has a name present in `barreFreeNames` (an open/non-barre
+  // voicing). If no such roll is found, it falls back to the last attempt — and the
+  // fretboard resolver independently guarantees no barre is ever drawn.
+  barreEnabled?: boolean;
+  barreFreeNames?: Set<string>;
+  barreFreeAttempts?: number;
+}
+
+// Probability that a given bar's diatonic triad gets a 7th/extension color, per complexity.
+const COMPLEXITY_COLOR_PROB: Record<Complexity, number> = {
+  simple: 0, sparse: 0, rich: 0.45, adventurous: 0.45,
+  lush: 0.72, jazzy: 0.9, mixed: 0.55,
+};
+
+// Apply the per-complexity extension mutation to a single Roman-degree token.
+// Returns the (possibly extended) degree token. Consumes `rng` once per mutation attempted.
+const colorDegree = (
+  rng: () => number,
+  d: string,
+  complexity: Complexity
+): string => {
+  const p = COMPLEXITY_COLOR_PROB[complexity];
+  if (p <= 0 || rng() >= p) return d;
+
+  if (complexity === "jazzy") {
+    // Jazz: 7ths everywhere; maj9 on I, 9 on V, m7b5 on vii°.
+    if (d === "I") return rng() < 0.5 ? "Imaj9" : "I7maj";
+    if (d === "IV") return "IV7maj";
+    if (d === "V") return rng() < 0.5 ? "V9" : "V7";
+    if (d === "ii") return "ii7";
+    if (d === "vi") return "vi7";
+    if (d === "vii°") return "viiø7"; // half-diminished (m7b5)
+    return d;
+  }
+  if (complexity === "lush") {
+    // Lush: 7ths + add9/sus colors. add9 on I, sus4 on V, maj7 on IV.
+    if (d === "I") return rng() < 0.5 ? "Iadd9" : "I7maj";
+    if (d === "IV") return "IV7maj";
+    if (d === "V") return rng() < 0.5 ? "Vsus4" : "V7";
+    if (d === "ii") return "ii7";
+    if (d === "vi") return rng() < 0.5 ? "vi7" : "vi"; // keep some plain minors
+    if (d === "iii") return "iii7";
+    return d;
+  }
+  // rich / adventurous / mixed → classic 7th coloring
+  if (d === "I") return "I7maj";
+  if (d === "IV") return "IV7maj";
+  if (d === "V") return "V7";
+  if (d === "ii") return "ii7";
+  if (d === "vi") return "vi7";
+  return d;
+};
+
+// Parse an extended degree token ("Imaj9", "V9", "Vsus4", "viiø7", "I7maj", "V7", "ii7",
+// "iv"…) into a base roman + a target quality. Returns null for plain triads handled inline.
+const resolveExtQuality = (d: string): { base: string; quality: ChordQuality | null } => {
+  if (d === "Imaj9") return { base: "I", quality: "maj9" };
+  if (d === "Iadd9") return { base: "I", quality: "add9" };
+  if (d === "I7maj") return { base: "I", quality: "maj7" };
+  if (d === "IV7maj") return { base: "IV", quality: "maj7" };
+  if (d === "V9") return { base: "V", quality: "9" };
+  if (d === "V7") return { base: "V", quality: "dom7" };
+  if (d === "Vsus4") return { base: "V", quality: "sus4" };
+  if (d === "ii7") return { base: "ii", quality: "m7" };
+  if (d === "iii7") return { base: "iii", quality: "m7" };
+  if (d === "vi7") return { base: "vi", quality: "m7" };
+  if (d === "viiø7") return { base: "vii°", quality: "m7b5" };
+  return { base: d, quality: null };
+};
+
+const rollOnce = (
   seed: number,
   mood: Mood,
   genre: Genre,
@@ -453,42 +527,55 @@ export const generateRoll = (
   // First try: weighted pick from DEFAULT_BAR_WEIGHTS (Cozy × Indie Folk bucket).
   let degrees = DEFAULT_BAR_WEIGHTS.map((w) => pickWeighted(rng, w));
 
+  // Sparse: prefer fewer chord changes — repeat the first chord into bar 2, and the
+  // third into bar 4, with high probability. The harmony stays open and breath-y.
+  if (complexity === "sparse") {
+    if (rng() < 0.7) degrees[1] = degrees[0];
+    if (rng() < 0.6) degrees[3] = degrees[2];
+  }
+
   // Smooth: bias against pathological shapes (no I → vii° with no resolution enforced at start/end).
   if (degrees[0] === "vii°") degrees[0] = "I";
   if (degrees[degrees.length - 1] === "vii°") degrees[degrees.length - 1] = "I";
 
-  // Complexity mutations
-  if (complexity === "rich" || complexity === "adventurous") {
-    degrees = degrees.map((d) => {
-      if (rng() < 0.45) {
-        if (d === "I") return "I7maj";   // Imaj7
-        if (d === "IV") return "IV7maj"; // IVmaj7
-        if (d === "V") return "V7";      // V7
-        if (d === "ii") return "ii7";     // ii7
-        if (d === "vi") return "vi7";     // vi7
-      }
-      return d;
-    });
-  }
+  // Complexity coloring (per-bar). "mixed" lets each bar roll rich/lush/jazzy flavor.
+  degrees = degrees.map((d) => {
+    if (complexity === "mixed") {
+      const pick = ["rich", "lush", "jazzy", "adventurous"][Math.floor(rng() * 4)] as Complexity;
+      return colorDegree(rng, d, pick);
+    }
+    return colorDegree(rng, d, complexity);
+  });
+
+  // Adventurous: borrowed iv + secondary dominant (only on adventurous — not on mixed).
   if (complexity === "adventurous") {
     if (rng() < 0.20) degrees[2] = "iv"; // borrowed iv
     if (rng() < 0.10) degrees[1] = "V/IV"; // secondary dominant placeholder (resolves to IV)
   }
 
-  // Resolve degrees to chords; convert "X7maj" markers
+  // Resolve degree tokens → chords
   const chords: Chord[] = degrees.map((d) => {
-    const ext = (() => {
-      if (d.endsWith("7maj")) return { base: d.slice(0, -4), quality: "maj7" as ChordQuality };
-      if (d.endsWith("7")) return { base: d.slice(0, -1), quality: "dom7" as ChordQuality };
-      return { base: d, quality: "maj" as ChordQuality };
-    })();
+    const ext = resolveExtQuality(d);
     const idx = ROMAN_TO_DEGREE_IDX[ext.base] ?? 0;
     const base = diatonic[idx];
+    if (ext.quality == null) {
+      if (ext.base === "iv" && key.type === "maj") return makeChord(pitchAt(key.tonic, 5), "min");
+      return base;
+    }
+    // Map the requested quality onto the diatonic root, preserving major/minor family:
     if (ext.quality === "maj7" && base.quality === "maj") return makeChord(base.root, "maj7");
     if (ext.quality === "maj7" && base.quality === "min") return makeChord(base.root, "m7");
     if (ext.quality === "dom7" && base.quality === "maj") return makeChord(base.root, "dom7");
     if (ext.quality === "dom7" && base.quality === "min") return makeChord(base.root, "m7");
-    if (ext.base === "iv" && key.type === "maj") return makeChord(pitchAt(key.tonic, 5), "min");
+    if (ext.quality === "maj9" && base.quality === "maj") return makeChord(base.root, "maj9");
+    if (ext.quality === "maj9" && base.quality === "min") return makeChord(base.root, "m7"); // fall back to m7
+    if (ext.quality === "9" && base.quality === "maj") return makeChord(base.root, "9");
+    if (ext.quality === "9" && base.quality === "min") return makeChord(base.root, "m7");
+    if (ext.quality === "add9" && base.quality === "maj") return makeChord(base.root, "add9");
+    if (ext.quality === "add9" && base.quality === "min") return makeChord(base.root, "madd9");
+    if (ext.quality === "sus4") return makeChord(base.root, "sus4");
+    if (ext.quality === "m7" && base.quality === "min") return makeChord(base.root, "m7");
+    if (ext.quality === "m7b5") return makeChord(base.root, "m7b5");
     return base;
   });
   const romans = chords.map((c) => romanOf(c, key));
@@ -507,15 +594,36 @@ export const generateRoll = (
     key,
     complexity,
     moodDescriptor: MOOD_DESCRIPTOR[mood],
-    progression: {
-      key,
-      chords,
-      romans,
-      pattern,
-      reason,
-      bpm: MOOD_BPM[mood],
-    },
+    progression: { key, chords, romans, pattern, reason, bpm: MOOD_BPM[mood] },
   };
+};
+
+export const generateRoll = (
+  seed: number,
+  mood: Mood,
+  genre: Genre,
+  key: Key,
+  complexity: Complexity,
+  opts: GenerateOpts = {}
+): Roll => {
+  const { barreEnabled = true, barreFreeNames, barreFreeAttempts = 80 } = opts;
+  if (barreEnabled || !barreFreeNames || barreFreeNames.size === 0) {
+    return rollOnce(seed, mood, genre, key, complexity);
+  }
+  // Barre-off mode: retry seeds until every chord lands on a name with a known
+  // open (non-barre) voicing in the chosen tuning. This keeps the harmony intact
+  // — we never substitute chords, only search for a seed whose diatonic draw is
+  // barre-free. If we exhaust the attempts we return the last candidate; the
+  // fretboard resolver independently guarantees no barre is ever drawn.
+  let last = rollOnce(seed, mood, genre, key, complexity);
+  const hasAll = (r: Roll) => r.progression.chords.every((c) => barreFreeNames.has(c.displayName));
+  if (hasAll(last)) return last;
+  for (let attempt = 1; attempt < barreFreeAttempts; attempt++) {
+    const candidate = rollOnce(seed + attempt, mood, genre, key, complexity);
+    last = candidate;
+    if (hasAll(candidate)) return candidate;
+  }
+  return last;
 };
 
 // === One-tap transformations ===
@@ -524,11 +632,14 @@ export interface TransformationResult {
   reason: string;
 }
 
-export const applyTransformation = (
-  roll: Roll,
-  transformation: "sadder" | "cozier" | "darker" | "moreHopeful" | "moreIndie" | "simpler"
-): TransformationResult => {
-  const next: Roll = JSON.parse(JSON.stringify(roll));
+// Pure mutation core — no barre awareness. Mutates `next.progression.chords` in place
+// and returns the one-line reason. The "darker" branch may regenerate the progression,
+// forwarding `opts` so the regenerated roll also respects the barre filter.
+const applyMutation = (
+  next: Roll,
+  transformation: "sadder" | "cozier" | "darker" | "moreHopeful" | "moreIndie" | "simpler",
+  opts: GenerateOpts
+): string => {
   const chords = next.progression.chords;
   let reason = "";
 
@@ -555,9 +666,10 @@ export const applyTransformation = (
       break;
     }
     case "darker": {
-      // Force tonic to minor — express the parallel-minor borrow
+      // Force tonic to minor — express the parallel-minor borrow. Regenerate so the
+      // new minor-key progression is theory-correct; forward barre opts.
       next.key = { tonic: next.key.tonic, type: "min" };
-      next.progression = generateRoll(roll.seed + 1, roll.mood, roll.genre, next.key, roll.complexity).progression;
+      next.progression = generateRoll(next.seed + 1, next.mood, next.genre, next.key, next.complexity, opts).progression;
       reason = "Borrows from the dark twin — parallel-minor key.";
       break;
     }
@@ -593,7 +705,38 @@ export const applyTransformation = (
   // Recompute romans & pattern
   next.progression.romans = chords.map((c) => romanOf(c, next.key));
   next.progression.pattern = next.progression.romans.filter(Boolean).join(",");
-  return { roll: next, reason };
+  return reason;
+};
+
+export const applyTransformation = (
+  roll: Roll,
+  transformation: "sadder" | "cozier" | "darker" | "moreHopeful" | "moreIndie" | "simpler",
+  opts: GenerateOpts = {}
+): TransformationResult => {
+  const { barreEnabled = true, barreFreeNames, barreFreeAttempts = 80 } = opts;
+  const noBarre = barreEnabled === false && !!barreFreeNames && barreFreeNames.size > 0;
+
+  // First attempt on the actual source roll.
+  const first: Roll = JSON.parse(JSON.stringify(roll));
+  const reason = applyMutation(first, transformation, opts);
+  if (!noBarre) return { roll: first, reason };
+
+  const hasAll = (r: Roll) => r.progression.chords.every((c) => barreFreeNames!.has(c.displayName));
+  if (hasAll(first)) return { roll: first, reason };
+
+  // Barre-off: the in-place mutation produced a barre-only chord (rare — e.g. a
+  // relative lifted to a root with no open shape). Re-roll the SOURCE seed and re-apply
+  // the same transformation deterministically until the result is barre-free (capped).
+  // We never substitute chords by hand — we only search seed-space, so the harmony
+  // stays whatever the engine + the transformation legitimately produce.
+  for (let attempt = 1; attempt < barreFreeAttempts; attempt++) {
+    const source = generateRoll(roll.seed + attempt, roll.mood, roll.genre, roll.key, roll.complexity, opts);
+    const candidate: Roll = JSON.parse(JSON.stringify(source));
+    const candReason = applyMutation(candidate, transformation, opts);
+    if (hasAll(candidate)) return { roll: candidate, reason: candReason };
+  }
+  // Last resort — keep the first result; the fretboard resolver guarantees no barre is drawn.
+  return { roll: first, reason };
 };
 
 // === Offline explain engine ===

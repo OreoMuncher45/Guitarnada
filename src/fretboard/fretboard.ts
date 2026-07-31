@@ -168,8 +168,36 @@ const generateBarre = (root: NoteClass, quality: ChordQuality, tuning: Tuning): 
   return null;
 };
 
+// Chords in the standard-tuning library that are genuinely open-position shapes
+// (no barre): the keys with NO `capo` field in LIBRARY_SHAPES. F, B, Bm, Fm carry a
+// `capo` field because their canonical shape IS a barre, so they're excluded.
+// Used by the engine to seed-roll barre-free progressions when the user turns barre off.
+const OPEN_LIBRARY_NAMES = new Set<string>(
+  Object.entries(LIBRARY_SHAPES)
+    .filter(([, def]) => def.capo == null)
+    .map(([name]) => name)
+);
+
+// Names of chords that have a known, fingerable voicing WITHOUT a barre for the given
+// tuning. For non-standard tunings the library is empty, so we return an empty set and
+// let the fretboard resolver + adHocTriad voice chords as 3-string open shapes instead
+// (still no barre by construction). An empty set signals "no guarantee from the library"
+// to the engine, which will then only filter when truly barre-free shapes are known.
+export const barreFreeChordNames = (tuningId: string): Set<string> => {
+  if (tuningId !== DEFAULT_TUNING_ID) return new Set();
+  return new Set(OPEN_LIBRARY_NAMES);
+};
+
 // Main resolver: try the library (standard tuning only), then the barre generator, then ad-hoc triad.
-export const fingeringForChord = (root: NoteClass, quality: ChordQuality, tuningId = DEFAULT_TUNING_ID): Fingering => {
+// `allowBarre=false` skips the movable-barre generator — only hand-built open shapes and the
+// ad-hoc 3-string open-position triad are used. This hard-guarantees no barre is ever drawn,
+// regardless of what the roll produced.
+export const fingeringForChord = (
+  root: NoteClass,
+  quality: ChordQuality,
+  tuningId = DEFAULT_TUNING_ID,
+  allowBarre = true
+): Fingering => {
   const tuning = tuningById(tuningId);
   if (tuning.id === DEFAULT_TUNING_ID) {
     const name = chordToName(root, quality);
@@ -187,8 +215,12 @@ export const fingeringForChord = (root: NoteClass, quality: ChordQuality, tuning
       };
     }
   }
-  const barre = generateBarre(root, quality, tuning);
-  if (barre) return barre;
+  // Library miss. When the user turned barre off, skip the barre generator entirely;
+  // fall straight to the ad-hoc open-position triad (always non-barre by construction).
+  if (allowBarre) {
+    const barre = generateBarre(root, quality, tuning);
+    if (barre) return barre;
+  }
   return adHocTriad(root, quality, tuning);
 };
 
@@ -240,12 +272,17 @@ export const noteAtPosition = (stringIdx: number, fret: number, tuning: Tuning):
 };
 
 export interface ChordView { root: NoteClass; quality: ChordQuality; name: string; fingering: Fingering; }
-export const makeChordView = (root: NoteClass, quality: ChordQuality, tuningId = DEFAULT_TUNING_ID): ChordView => {
+export const makeChordView = (
+  root: NoteClass,
+  quality: ChordQuality,
+  tuningId = DEFAULT_TUNING_ID,
+  allowBarre = true
+): ChordView => {
   return {
     root,
     quality,
     name: chordToName(root, quality),
-    fingering: fingeringForChord(root, quality, tuningId),
+    fingering: fingeringForChord(root, quality, tuningId, allowBarre),
   };
 };
 

@@ -20,6 +20,7 @@ export function PlaygroundScreen() {
   const setTuningId = useStore((s) => s.setTuningId);
   const saveChord = useStore((s) => s.saveChord);
   const openExplain = useStore((s) => s.openExplain);
+  const barreEnabled = useStore((s) => s.barreEnabled);
   const tuning = tuningById(tuningId);
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function PlaygroundScreen() {
   const playSelected = () => {
     if (!selectedChord) return;
     guitar.resume();
-    const cv = makeChordViewImpl(selectedChord.root, selectedChord.quality, tuningId);
+    const cv = makeChordViewImpl(selectedChord.root, selectedChord.quality, tuningId, barreEnabled);
     const midis = fingeringToPlayableMidisImpl(cv.fingering, tuning);
     guitar.playChord(midis, { strum: "down" });
   };
@@ -95,7 +96,7 @@ export function PlaygroundScreen() {
 
       {selectedChord && (
         <div style={{ marginTop: "-1rem", display: "flex", alignItems: "center", gap: "2rem", flexWrap: "wrap" }}>
-          <ChordDiagram chordName={selectedName ?? ""} fingering={makeChordViewImpl(selectedChord.root, selectedChord.quality, tuningId).fingering} tuningId={tuningId} />
+          <ChordDiagram chordName={selectedName ?? ""} fingering={makeChordViewImpl(selectedChord.root, selectedChord.quality, tuningId, barreEnabled).fingering} tuningId={tuningId} />
           <div>
             <button className="cta" onClick={playSelected} style={{ marginTop: 0 }}><span style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}><PlayIcon width={12} height={12} /> Play</span></button>
             <br />

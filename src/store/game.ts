@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import type { Roll, Mood, Genre, Key, Complexity, Chord } from "../theory/engine";
 import { generateRoll, applyTransformation } from "../theory/engine";
 import { guitar, DEFAULT_TUNING_ID, type Tuning, TUNINGS, tuningById, openStringMidis } from "../audio/guitar";
-import { makeChordView, fingeringToPlayableMidis } from "../fretboard/fretboard";
+import { makeChordView, fingeringToPlayableMidis, barreFreeChordNames } from "../fretboard/fretboard";
 import { ALL_PATTERNS, STRUMS, FINGERPICKS, type Pattern } from "../audio/patterns";
 
 const DEFAULT_SEED = (): number => Math.floor(Math.random() * 1e9);
@@ -43,6 +43,7 @@ interface GameState {
   genre: Genre;
   key: Key;
   complexity: Complexity;
+  barreEnabled: boolean;
   seed: number;
   currentRoll: Roll | null;
   rollerAnimation: boolean;
@@ -67,6 +68,7 @@ interface GameState {
   setGenre: (g: Genre) => void;
   setKey: (k: Key) => void;
   setComplexity: (c: Complexity) => void;
+  setBarre: (on: boolean) => void;
   setTuningId: (id: string) => void;
   setCapo: (n: number) => void;
   setBpm: (n: number) => void;
@@ -96,11 +98,23 @@ interface GameState {
 
 export const useStore = create<GameState>()(
   persist(
-    (set, get) => ({
+    (set, get) => {
+      // Build the engine options from current state. The barre filter only engages
+      // when the user turned barre OFF; `barreFreeChordNames` gives the open-voicing
+      // set for the chosen tuning (empty for non-standard tunings → engine then only
+      // filters when it can guarantee barre-free shapes, and the fretboard resolver
+      // still hard-guarantees no barre is ever drawn).
+      const buildOpts = () => {
+        const s = get();
+        if (s.barreEnabled) return {};
+        return { barreEnabled: false, barreFreeNames: barreFreeChordNames(s.tuningId) };
+      };
+      return {
       mood: "cozy",
       genre: "indieFolk",
       key: DEFAULT_KEY,
       complexity: "simple",
+      barreEnabled: true,
       seed: DEFAULT_SEED(),
       currentRoll: null,
       rollerAnimation: false,
@@ -123,7 +137,23 @@ export const useStore = create<GameState>()(
       setMood: (m) => set({ mood: m }),
       setGenre: (g) => set({ genre: g }),
       setKey: (k) => set({ key: k }),
-      setComplexity: (c) => set({ complexity: c }),
+      setComplexity: (c) => {
+        set({ complexity: c });
+        // Re-roll so the existing roll immediately reflects the new complexity,
+        // keeping mood/genre/key and the barre filter honored.
+        const s = get();
+        const seed = DEFAULT_SEED();
+        const roll = generateRoll(seed, s.mood, s.genre, s.key, c, buildOpts());
+        set({ seed, currentRoll: roll, bpm: roll.progression.bpm });
+      },
+      setBarre: (on) => {
+        set({ barreEnabled: on });
+        // Re-roll so the existing roll immediately honors the new barre setting.
+        const s = get();
+        const seed = DEFAULT_SEED();
+        const roll = generateRoll(seed, s.mood, s.genre, s.key, s.complexity, buildOpts());
+        set({ seed, currentRoll: roll, bpm: roll.progression.bpm });
+      },
       setTuningId: (id) => { const t = tuningById(id); guitar.ensure(); guitar.tune(t); set({ tuningId: id }); },
       setCapo: (n) => set({ capo: Math.max(0, Math.min(12, n)) }),
       setBpm: (n) => set({ bpm: Math.max(40, Math.min(220, n)) }),
@@ -134,7 +164,7 @@ export const useStore = create<GameState>()(
       roll: () => {
         const s = get();
         const seed = DEFAULT_SEED();
-        const roll = generateRoll(seed, s.mood, s.genre, s.key, s.complexity);
+        const roll = generateRoll(seed, s.mood, s.genre, s.key, s.complexity, buildOpts());
         set({ seed, currentRoll: roll, bpm: roll.progression.bpm });
       },
 
@@ -148,14 +178,14 @@ export const useStore = create<GameState>()(
       transform: (t) => {
         const s = get();
         if (!s.currentRoll) return;
-        const { roll: next } = applyTransformation(s.currentRoll, t);
+        const { roll: next } = applyTransformation(s.currentRoll, t, buildOpts());
         set({ currentRoll: next, key: next.key, explainTarget: { kind: "roll", roll: next } });
       },
 
       playCurrentChord: (chord, opts) => {
         const s = get();
         try {
-          const cv = makeChordView(chord.root, chord.quality, s.tuningId);
+          const cv = makeChordView(chord.root, chord.quality, s.tuningId, s.barreEnabled);
           const tuning = tuningById(s.tuningId);
           const midis = fingeringToPlayableMidis(cv.fingering, tuning);
           const capo = opts?.capo ?? s.capo;
@@ -228,11 +258,12 @@ export const useStore = create<GameState>()(
       },
 
       setInstallDeferred: (e) => set({ installDeferred: e }),
-    }),
+      };
+    },
     {
       name: "guitarnada-v2",
       partialize: (s) => ({
-        mood: s.mood, genre: s.genre, key: s.key, complexity: s.complexity,
+        mood: s.mood, genre: s.genre, key: s.key, complexity: s.complexity, barreEnabled: s.barreEnabled,
         tuningId: s.tuningId, capo: s.capo, bpm: s.bpm,
         strumPatternId: s.strumPatternId, fingerPatternId: s.fingerPatternId,
         volume: s.volume,

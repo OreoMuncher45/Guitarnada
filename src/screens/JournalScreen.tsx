@@ -11,11 +11,12 @@ export function JournalScreen() {
   const rolls = useStore((s) => s.savedRolls);
   const chords = useStore((s) => s.savedChords);
   const removeSavedChord = useStore((s) => s.removeSavedChord);
+  const barreEnabled = useStore((s) => s.barreEnabled);
   const [openedId, setOpenedId] = useState<string | null>(null);
 
   const playSavedChord = (c: typeof chords[number]) => {
     const t = tuningById(c.tuningId);
-    const midis = fingeringToPlayableMidis(makeChordView(c.chord.root, c.chord.quality, c.tuningId).fingering, t);
+    const midis = fingeringToPlayableMidis(makeChordView(c.chord.root, c.chord.quality, c.tuningId, barreEnabled).fingering, t);
     guitar.resume(); guitar.tune(t); guitar.playChord(midis, { strum: "down" });
   };
 
@@ -42,7 +43,7 @@ export function JournalScreen() {
           {chords.map((c) => (
             <div key={c.id} style={{ padding: "1.4rem 0", borderTop: "1px solid var(--hair)", display: "flex", alignItems: "center", gap: "1rem" }}>
               <div onClick={() => playSavedChord(c)} style={{ cursor: "pointer" }}>
-                <ChordDiagram compact chordName={c.name} fingering={makeChordView(c.chord.root, c.chord.quality, c.tuningId).fingering} tuningId={c.tuningId} />
+                <ChordDiagram compact chordName={c.name} fingering={makeChordView(c.chord.root, c.chord.quality, c.tuningId, barreEnabled).fingering} tuningId={c.tuningId} />
               </div>
               <div style={{ flex: 1 }}>
                 <div className="label" style={{ color: "var(--smoke)" }}>{c.feelingTags.join(" \u00B7 ")}</div>
@@ -94,6 +95,7 @@ const COMMON_CHORDS = ["C", "Cadd9", "Cmaj7", "G", "Gsus2", "G6", "D", "Dmaj7", 
 function SongEditor({ roll, onBack }: EditorProps) {
   const updateSavedRoll = useStore((s) => s.updateSavedRoll);
   const removeSavedRoll = useStore((s) => s.removeSavedRoll);
+  const barreEnabled = useStore((s) => s.barreEnabled);
 
   const [name, setName] = useState(roll.name);
   const [capo, setCapo] = useState(roll.capo);
@@ -119,7 +121,7 @@ function SongEditor({ roll, onBack }: EditorProps) {
     guitar.tune(tuning);
     const barMs = (60_000 / bpm) * 4;
     roll.roll.progression.chords.forEach((c, i) => {
-      const midis = fingeringToPlayableMidis(makeChordView(c.root, c.quality, tuningId).fingering, tuning).map((m) => m + capo);
+      const midis = fingeringToPlayableMidis(makeChordView(c.root, c.quality, tuningId, barreEnabled).fingering, tuning).map((m) => m + capo);
       guitar.playChord(midis, { when: guitar.now() + (i * barMs) / 1000 + 0.05, strum: "down" });
     });
   };
@@ -127,7 +129,7 @@ function SongEditor({ roll, onBack }: EditorProps) {
   const previewPatternWithFirstChord = () => {
     guitar.tune(tuning);
     const c0 = roll.roll.progression.chords[0];
-    const midis = fingeringToPlayableMidis(makeChordView(c0.root, c0.quality, tuningId).fingering, tuning).map((m) => m + capo);
+    const midis = fingeringToPlayableMidis(makeChordView(c0.root, c0.quality, tuningId, barreEnabled).fingering, tuning).map((m) => m + capo);
     const stepMs = (60_000 / bpm) / (pattern.beats / 4);
     pattern.strokes.forEach((s, i) => {
       if (s === ".") return;
@@ -204,7 +206,7 @@ function SongEditor({ roll, onBack }: EditorProps) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
         {roll.roll.progression.chords.map((c, i) => (
           <div key={i}>
-            <ChordDiagram compact chordName={c.displayName} fingering={makeChordView(c.root, c.quality, tuningId).fingering} tuningId={tuningId} />
+            <ChordDiagram compact chordName={c.displayName} fingering={makeChordView(c.root, c.quality, tuningId, barreEnabled).fingering} tuningId={tuningId} />
           </div>
         ))}
       </div>
